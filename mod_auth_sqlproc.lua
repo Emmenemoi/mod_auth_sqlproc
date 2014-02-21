@@ -8,9 +8,7 @@ local DBI = require "DBI"
 
 local connection;
 local params = module:get_option("auth_sqlproc", module:get_option("sql"));
-local auth_proc_name = module:get_option_string("auth_sql_procedure", "UserLoginPlainPw");
-local auth_proc_name = module:get_option_string("auth_sql_procedure", "UserLoginPlainPw");
-
+local procedures = module:get_option("auth_sql_procedures", {}); -- auth + user_exists
 
 local resolve_relative_path = require "core.configmanager".resolve_relative_path;
 
@@ -53,6 +51,10 @@ do -- process options to get a db connection
         assert(params.driver and params.database, "Both the SQL driver and the database need to be specified");
        
         assert(connect());
+        
+        procedures.auth = procedures.auth or "UserLoginPlainPw";
+        procedures.user_exists = procedures.user_exists or "UserExists";
+
 end
 
 local function getsql(sql, ...)
@@ -74,8 +76,8 @@ end
 
 local function storedProcCheckPassword(username, password)
     local jid, err = username.."@"..module.host
-    --module:log("debug", "Check Auth for %s / %s", tostring(jid) , tostring(password));
-    local stmt, err = getsql("CALL "..auth_proc_name.."(? , ?)", jid, password);
+    module:log("debug", "Check Auth for %s / %s", tostring(jid) , tostring(password));
+    local stmt, err = getsql("CALL "..procedures.auth.."(? , ?)", jid, password);
     if stmt then
             for row in stmt:rows(true) do
                     --module:log("debug", "Answer Auth: %s", tostring(row.user_id));
@@ -83,6 +85,19 @@ local function storedProcCheckPassword(username, password)
             end
     end
 end
+
+local function storedProcUserExists(username)
+    local jid, err = username.."@"..module.host
+    module:log("debug", "Check User Exists for %s", tostring(jid) );
+    local stmt, err = getsql("CALL "..procedures.user_exists.."(?)", jid);
+    if stmt then
+            for row in stmt:rows(true) do
+                    module:log("debug", "Answer Auth: %s", tostring(row.user_id));
+                    return row.user_id == jid;
+            end
+    end
+end
+
 
 provider = {};
 
@@ -96,7 +111,7 @@ function provider.set_password(username, password)
         return nil, "Setting password is not supported.";
 end
 function provider.user_exists(username)
-        return nil, "User exists not supported."
+        return storedProcUserExists(username) and true; --nil, "User exists not supported."
 end
 function provider.create_user(username, password)
         return nil, "Account creation/modification not supported.";
